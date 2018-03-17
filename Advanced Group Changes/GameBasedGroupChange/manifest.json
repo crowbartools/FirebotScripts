@@ -1,1 +1,12 @@
-test
+{
+    "name": "Game Based Group Change",
+    "version": "1.0",
+    "author": "godmachine",
+    "website": "https://twitter.com/g0dmach1ne",
+    "description": "Gives you control over when your game-specific button groups can be used.",
+    "longDescription": "Do you have buttons grouped together for use with certain games? Ever be streaming a game and suddenly you hear the audio from a button you created specifically for a different game? Wish you could stop that from happening? With [whatever this thing gets called] you can do just that. Follow the simple instructions provided and you can be sure that buttons only pertaining to the current game can be used.",
+    "patchNotes": "None",
+    "triggers": "Interactive",
+    "dependencies": "Chat, Interactive",
+    "firebotVersion": "4.10.5"
+}
