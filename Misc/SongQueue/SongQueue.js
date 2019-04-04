@@ -3,7 +3,7 @@ exports.getScriptManifest = function() {
 		name: "Song Queue",
 		description: "Maintains a song queue in a txt file so you can show it on your stream. Subs automatically get requests pushed in front of non-sub requests.",
 		author: "ebiggz",
-		version: "1.7"
+		version: "1.8"
 	}
 }
 
@@ -148,7 +148,7 @@ function run(runRequest) {
     }
 
     if(!fs.existsSync(statsPath)) {
-      fs.writeFileSync(statsPath, '{ "viewers": {}, "songs": {}}', 'utf8');
+      fs.writeFileSync(statsPath, '{ "alltime": { "viewers": {}, "songs": {} }', 'utf8');
     }
 
     let cacheDb = new JsonDb(songListCachePath, true, true);
@@ -180,6 +180,15 @@ function run(runRequest) {
     if(global.sqStats == null) {
       try {
         global.sqStats = statsDb.getData("/");    
+        if(global.sqStats == null || global.sqStats.alltime == null) {
+          global.sqStats = { 
+            alltime: {
+              viewers: {},
+              songs: {}
+            }
+          }
+          statsDb.push("/",global.sqStats);
+        }
       } catch (err) {}
       if(global.sqStats == null) {
         global.sqStats = {};
@@ -232,8 +241,47 @@ function run(runRequest) {
       return newBalance;
     }
 
+    function escapeRegExp(str) {
+      return str.replace(/[\-\[\]\/\{\}\(\)\*\+\?\.\\\^\$\|]/g, "\\$&"); // eslint-disable-line no-useless-escape
+    }
 
-    let chatResponse = {};
+    function replaceAll(string, text, replacement = "") {
+      return string.replace(new RegExp(escapeRegExp(text), "g"), replacement);
+    }
+
+    function getStatForTypeAndBucket(type, bucket, id) {
+      let count = 0;
+      try {
+        count = statsDb.getData(`/${type}/${bucket}/${id}`);
+      } catch(error) {
+      };
+      return count;
+    }
+
+    function incrementStatForTypeAndBucket(type, bucket, id) {
+      if(type == null || bucket == null || id == null) return;
+
+      // clean id property for saving to db
+      id = replaceAll(id, "/", "");
+      id = replaceAll(id, "\"", "");
+
+      let currentStat = getStatForTypeAndBucket(type, bucket, id);
+      let updatedStat = currentStat + 1;
+
+      global.sqStats[type][bucket][id] = updatedStat;
+
+      statsDb.push(`/${type}/${bucket}/${id}`, updatedStat);
+    }
+
+    function recordStatForRequest(songRequest) {
+      if(songRequest == null || songRequest.user == null || songRequest.song == null) return;
+
+      let userName = songRequest.user.name;
+      incrementStatForTypeAndBucket("alltime", "viewers", userName);
+
+      let songName = songRequest.song;
+      incrementStatForTypeAndBucket("alltime", "songs", songName);
+    }
 
     let command = runRequest.command,
         args = command.args,
@@ -286,7 +334,7 @@ function run(runRequest) {
         else if(arg == "requests" || arg == "request" || arg == "tokens" || arg == "token") {
           skipAdd = true;
           let requests = global.requestBankDb[user.name] || 0;
-          message(`${user.name} has ${requests} song request(s).`);
+          message(`@${user.name} has ${requests} song request token(s).`);
           return resolve();
         }
         else if(arg === "requesthistory") {
@@ -307,7 +355,7 @@ function run(runRequest) {
 
           let giverRequests = getRequestBalance(user.name);
           if(giverRequests < 1) {
-            message(`You currently don't have any request tokens to give. You can get request tokens by donating or subscribing. :)`, user.name);
+            message(`You currently don't have any request tokens to give. You can get request tokens by donating, subscribing, or buying one with sparks. :)`, user.name);
             return resolve(response);
           }
 
@@ -348,7 +396,7 @@ function run(runRequest) {
         if(global.queueFreeRequests !== true) {
           let requests = getRequestBalance(user.name);
           if(requests < 1) {
-            message(`@${user.name}, you currently don't have any requests to use for this. You can get requests by donating or subscribing. You can also wait for a Free Requests day! :)`);
+            message(`@${user.name}, you currently don't have any requests to use for this. You can get requests by donating, subscribing, or buying one with sparks. You can also wait for a Free Requests day! :)`);
             return resolve(response);
           }
         }
@@ -369,7 +417,7 @@ function run(runRequest) {
           return;
         }
 
-        if(songName.length > 32) {
+        if(songName.length > 40) {
           chatModule.deleteChat(messageId);
           message(`This song name is too long!`, user.name);
 
@@ -424,7 +472,9 @@ function run(runRequest) {
         };
 
         let index;
-        if(global.songQueue.length > 0 && isSub) {
+        let subPriority = false;
+        if(global.songQueue.length > 0 && isSub && !global.queueFreeRequests) {
+          subPriority = true;
           let firstNonSubRequestIndex = global.songQueue
             .slice(1, global.songQueue.length)
             .findIndex(r => r.user.sub === false) + 1;
@@ -437,15 +487,22 @@ function run(runRequest) {
             index = firstNonSubRequestIndex;
           }
         } else {
+
+          let useZeroIndex = false;
+          if(global.songQueue.length === 0) {
+            global.songQueue.push(null);
+            useZeroIndex = true;
+          }
+
           global.songQueue.push(request);
-          index = global.songQueue.length-1;
+          index = useZeroIndex ? 0 : global.songQueue.length-1;      
         }
 
-        let queuePosition = index > 1 ? `(Queue position: ${index}${isSub ? " - Subscriber priority" : ""})` : ` and it's next up!${isSub ? " (Subscriber priority)" : ""} `;
+        let queuePosition = index > 1 ? `[Queue position: ${index}${subPriority ? " - Subscriber priority" : ""}]` : ` and it's next up!${subPriority ? " [Subscriber priority]" : ""} `;
         message(`@${runRequest.user.name} has requested the song "${songName}" ${queuePosition}`);
 
         if(spentRequest) {
-          message(`You have ${getRequestBalance(user.name)} request(s) remaining.`, user.name);
+          message(`You have ${getRequestBalance(user.name)} request token(s) remaining.`, user.name);
         }
 
         if(global.sqPermittedUsers.includes(user.name)) {
@@ -490,18 +547,25 @@ function run(runRequest) {
         }
         else if(args[0] == "next") {
 
-          if(global.songQueue.length > 0) {
-
-            let previous = global.songQueue.shift();
+          let previous = global.songQueue.shift();
           
-            if(previous) {
-              global.requestHistory.push(previous.song);
-            }
+          if(previous != null && previous.song != null) {
+            global.requestHistory.push(previous.song);
 
+            recordStatForRequest(previous);
+          }
+
+          if(global.songQueue.length > 0) {
             let next = global.songQueue[0];
-            message(`The next song is "${next.song}", requested by @${next.user.name}`);
+            if(next && next.song && next.user) {
+              message(`The next song is "${next.song}", requested by @${next.user.name}`);
+            }
           } else {
-            message(`There are no songs in the queue. Request one!`);
+            if(global.queueDisabled) {
+              message(`There are no more songs in the queue.`);
+            } else {
+              message(`There are no songs in the queue. Request one!`);
+            }           
           }
           triggerModCmdCooldown();
         } else if(args[0] == "undo") {
@@ -523,7 +587,27 @@ function run(runRequest) {
         } 
         else if(args[0] == "status") {
           message(`Enabled: ${global.queueDisabled === true ? 'No' : 'Yes'} | Free Requests: ${global.queueFreeRequests === true ? 'Yes': 'No'}`, user.name);
-        }        
+        }  
+        else if(args[0] == "topsongs") {
+          let alltimeStats = global.sqStats.alltime.songs;
+
+          var items = Object.keys(alltimeStats).map(function(key) {
+            return [key, alltimeStats[key]];
+          });
+          
+          // Sort the array based on the second element
+          items.sort(function(first, second) {
+            return second[1] - first[1];
+          });
+          
+          // Create a new array with only the first 5 items
+          let top5 = items.slice(0, 5);
+
+          let top5Formatted = top5.map(kvp => `${kvp[0]} [${kvp[1]}]`).join(", ");
+
+          message(`All Time Top 5 Songs: ${top5Formatted}`);
+          
+        }      
       }
       else if (args.length > 1) {
 
@@ -646,7 +730,13 @@ function run(runRequest) {
 
           let songName = command.args.slice(2, args.length).join(" ");
 
-          global.songQueue[index].song = songName;
+          let request = global.songQueue[index];
+          if(!request) {
+            message(`Invalid rename command usage. ${command.trigger} rename [# or 'current'] [song name]`, user.name);
+            return resolve(response);
+          }
+
+          request.song = songName;
           if(index != 0) {
           message(`Song at position ${index} renamed to ${songName}`);
           } else {
@@ -681,7 +771,13 @@ function run(runRequest) {
 
           let veiwer = command.args[2].replace("@", "");
 
-          global.songQueue[index].user.name = veiwer;
+          let request = global.songQueue[index];
+          if(!request) {
+            message(`Invalid renameviewer command usage. ${command.trigger} renameviewer [# or 'current'] @viewername`, user.name);
+            return resolve(response);
+          }
+
+          request.user.name = veiwer;
           if(index != 0) {
           message(`Requester for song at position ${index} renamed to ${veiwer}`);
           } else {
@@ -721,6 +817,12 @@ function run(runRequest) {
             }
 
             let oldRequest = global.songQueue[index];
+
+            if(!oldRequest) {
+              message(`Invalid set command usage. ${command.trigger} remove [# or 'current'/@viewername/song name]`, user.name);
+              return resolve(response);
+            }
+
             global.sqCooldowns[oldRequest.user.name] = undefined;
 
             if(oldRequest.user.spentRequest) {
@@ -824,6 +926,10 @@ function run(runRequest) {
         }
       } 
       chatModule.deleteChat(messageId);
+
+      global.songQueue = global.songQueue.filter((request, index) => {
+        return request != null || (request == null && index == 0);
+      });
     }
 
     /**
@@ -844,7 +950,12 @@ function run(runRequest) {
     let fileData = "";
     let counter = 0;
     for(let request of global.songQueue) {
-      let songAndViewer = `${request.song} (${request.user.name}${request.user.sub ? '*' : ''})`;
+      let songAndViewer;
+      if(!request) {
+        songAndViewer = "";
+      } else {
+        songAndViewer = `${request.song} (${request.user.name}${request.user.sub ? '*' : ''})`;
+      }
       if(counter === 0) {
         fileData += `Current:\r\n${songAndViewer}`;
         if(global.songQueue.length > 1) {
@@ -1031,5 +1142,4 @@ function setLevenshtein() {
   };
 
   global.Levenshtein = Levenshtein;
-}
-
+} 
