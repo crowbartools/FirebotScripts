@@ -3,7 +3,7 @@ exports.getScriptManifest = function() {
 		name: "Song Queue",
 		description: "Maintains a song queue in a txt file so you can show it on your stream. Subs automatically get requests pushed in front of non-sub requests.",
 		author: "ebiggz",
-		version: "1.8"
+		version: "1.9"
 	}
 }
 
@@ -477,7 +477,7 @@ function run(runRequest) {
           subPriority = true;
           let firstNonSubRequestIndex = global.songQueue
             .slice(1, global.songQueue.length)
-            .findIndex(r => r.user.sub === false) + 1;
+            .findIndex(r => r != null && r.user.sub === false) + 1;
 
           if(firstNonSubRequestIndex === 0) {
             global.songQueue.push(request);
@@ -535,6 +535,7 @@ function run(runRequest) {
         if(args[0] == "clear" || args[0] == "reset") {
 
           global.songQueue.forEach(r => {
+            if(r == null) return;
             if(r.user.spentRequest) {
               updateRequestBalance(r.user.name, 1);
             }
@@ -957,9 +958,14 @@ function run(runRequest) {
         songAndViewer = `${request.song} (${request.user.name}${request.user.sub ? '*' : ''})`;
       }
       if(counter === 0) {
-        fileData += `Current:\r\n${songAndViewer}`;
+        if(request) {
+          fileData += `Current:\r\n${songAndViewer}`;
+        }
         if(global.songQueue.length > 1) {
-          fileData += "\r\n\r\nNext Up:";
+          if(request) {
+            fileData += "\r\n\r\n";
+          }
+          fileData += "Next Up:";
         }
       } else {
         fileData += "\r\n";
