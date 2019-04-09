@@ -3,7 +3,7 @@ exports.getScriptManifest = function() {
 		name: "Song Queue",
 		description: "Maintains a song queue in a txt file so you can show it on your stream. Subs automatically get requests pushed in front of non-sub requests.",
 		author: "ebiggz",
-		version: "1.9"
+		version: "1.10"
 	}
 }
 
@@ -592,7 +592,7 @@ function run(runRequest) {
         else if(args[0] == "topsongs") {
           let alltimeStats = global.sqStats.alltime.songs;
 
-          var items = Object.keys(alltimeStats).map(function(key) {
+          let items = Object.keys(alltimeStats).map(function(key) {
             return [key, alltimeStats[key]];
           });
           
@@ -608,7 +608,27 @@ function run(runRequest) {
 
           message(`All Time Top 5 Songs: ${top5Formatted}`);
           
-        }      
+        }
+        else if(args[0] == "toprequesters") {
+          let alltimeStats = global.sqStats.alltime.viewers;
+
+          let items = Object.keys(alltimeStats).map(function(key) {
+            return [key, alltimeStats[key]];
+          });
+          
+          // Sort the array based on the second element
+          items.sort(function(first, second) {
+            return second[1] - first[1];
+          });
+          
+          // Create a new array with only the first 5 items
+          let top5 = items.slice(0, 5);
+
+          let top5Formatted = top5.map(kvp => `${kvp[0]} [${kvp[1]}]`).join(", ");
+
+          message(`All Time Top 5 Requesters: ${top5Formatted}`);
+          
+        }     
       }
       else if (args.length > 1) {
 
@@ -621,42 +641,61 @@ function run(runRequest) {
 
         if(args[0] == "add" || args[0] == "current" || args[0] == "addfor" || args[0] == "currentfor") {
 
-          if(global.songQueue.length > queueLength) {
-            chatModule.deleteChat(messageId);
-            message(`Sorry, the song queue is currently full. Please clear a song first then do this command again.`, user.name);
-  
-            resolve(response);
-            return;
-          }
+            if(args[0] === "current" && args[1] === "none") {
 
-          let userName, songName;
-          if(args[0] == "addfor" || args[0] == "currentfor") {
-            userName = command.args[1].replace("@", "");
-            songName = args.slice(2, args.length).join(" ");
-          } else {
-            userName = user.name;
-            songName = args.slice(1, args.length).join(" ");
-          }
+              let sqLength = global.songQueue.length;
+              if(sqLength === 0) {
+                message(`Current slot already empty.`);
+              }
+              else if(sqLength > 0) {
+                if(global.songQueue[0] == null) {
+                  message(`Current slot already empty.`);
+                } else {
+                  global.songQueue.unshift(null);
+                  message(`Set current slot to empty.`);
+                }            
+              }
+              
 
-          // add new song
-          songName = capitalize(songName);
-          let request = { 
-            song: songName, 
-            user: { 
-              name: userName, 
-              sub: true,
-              spentRequest: false, 
-              timestamp: Date.now()
-             }
-           };
+            } else {
 
-           if(args[0] == "add" || args[0] == "addfor") {
-            global.songQueue.push(request);
-            message(`"${songName}" has been added.`);
-           } else {
-            global.songQueue.unshift(request);
-            message(`"${songName}" has been added as the current song.`);
-           }
+              if(global.songQueue.length > queueLength) {
+                chatModule.deleteChat(messageId);
+                message(`Sorry, the song queue is currently full. Please clear a song first then do this command again.`, user.name);
+      
+                resolve(response);
+                return;
+              }
+
+              let userName, songName;
+              if(args[0] == "addfor" || args[0] == "currentfor") {
+                userName = command.args[1].replace("@", "");
+                songName = args.slice(2, args.length).join(" ");
+              } else {
+                userName = user.name;
+                songName = args.slice(1, args.length).join(" ");
+              }
+
+              // add new song
+              songName = capitalize(songName);
+              let request = { 
+                song: songName, 
+                user: { 
+                  name: userName, 
+                  sub: true,
+                  spentRequest: false, 
+                  timestamp: Date.now()
+                }
+              };
+
+              if(args[0] == "add" || args[0] == "addfor") {
+                global.songQueue.push(request);
+                message(`"${songName}" has been added.`);
+              } else {
+                global.songQueue.unshift(request);
+                message(`"${songName}" has been added as the current song.`);
+              }
+            }
 
           triggerModCmdCooldown();
         }
@@ -993,6 +1032,9 @@ function getQueueIndex(input) {
   if(input == "c" || input == "current") {
     return 0;
   }
+  if(input == "l" || input == "last") {
+    return global.songQueue.length - 1;
+  }
   if(!isNaN(input)) {
     return parseInt(input);
   }
@@ -1000,13 +1042,16 @@ function getQueueIndex(input) {
 }
 
 function songAlreadyAdded(song) {
-  return songIsInList(global.songQueue.map(s => s.song), song);
+  return songIsInList(global.songQueue.map(s => {
+    return s == null ? null : s.song
+  }), song);
 }
 
 function songIsInList(list, song, leniency = 2) {
   let inList = false;
   song = dedupe(song.toLowerCase()).replace(/\_/g, " ").replace(/\-/g, " ");
   list.forEach(s => {
+    if(s == null) return;
     s = s.toLowerCase().replace(/_/g, " ").replace(/-/g, " ");
     let distance = global.Levenshtein.get(s.toLowerCase(), song);
     if(song.startsWith(s) || distance <= leniency) {
@@ -1015,7 +1060,6 @@ function songIsInList(list, song, leniency = 2) {
   })
   return inList;
 }
-var test = [];
 
 function capitalize(string) {
   if(string == null) return "";
